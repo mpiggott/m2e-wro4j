@@ -29,8 +29,10 @@ import org.eclipse.core.runtime.CoreException;
 import org.eclipse.core.runtime.IPath;
 import org.eclipse.core.runtime.IProgressMonitor;
 import org.eclipse.core.runtime.IStatus;
+import org.eclipse.core.runtime.NullProgressMonitor;
 import org.eclipse.core.runtime.Path;
 import org.eclipse.core.runtime.Status;
+import org.eclipse.core.runtime.SubMonitor;
 import org.eclipse.m2e.core.MavenPlugin;
 import org.eclipse.m2e.core.embedder.IMaven;
 import org.eclipse.m2e.core.project.IMavenProjectFacade;
@@ -51,6 +53,10 @@ public class Wro4jBuildParticipant
 
     private WroModel model;
 
+    private Boolean pomModified;
+
+    private String[] changedFiles;
+
     public Wro4jBuildParticipant( MojoExecution execution )
     {
         super( execution, true );
@@ -60,6 +66,14 @@ public class Wro4jBuildParticipant
     public Set<IProject> build( int kind, IProgressMonitor monitor )
         throws Exception
     {
+        if ( monitor == null )
+        {
+            monitor = new NullProgressMonitor();
+        }
+        monitor =
+            SubMonitor.convert( monitor, NLS.bind( "Invoking {0} on {1}",
+                                                   getMojoExecution().getMojoDescriptor().getFullGoalName(),
+                                                   getMavenProjectFacade().getProject().getName() ), 10 );
 
         MojoExecution mojoExecution = getMojoExecution();
         if ( mojoExecution == null )
@@ -73,12 +87,17 @@ public class Wro4jBuildParticipant
             return null;
         }
 
+        if ( monitor.isCanceled() )
+        {
+            throw new CoreException( Status.CANCEL_STATUS );
+        }
+        monitor.worked( 1 );
+
         Xpp3Dom originalConfiguration = mojoExecution.getConfiguration();
 
         Set<IProject> result = null;
         try
         {
-
             File destinationFolder = getFolder( mojoExecution, DESTINATION_FOLDER );
             File jsDestinationFolder = getFolder( mojoExecution, JS_DESTINATION_FOLDER );
             File cssDestinationFolder = getFolder( mojoExecution, CSS_DESTINATION_FOLDER );
@@ -88,25 +107,33 @@ public class Wro4jBuildParticipant
                 customize( originalConfiguration, destinationFolder, jsDestinationFolder, cssDestinationFolder );
             // Add custom configuration
             mojoExecution.setConfiguration( customConfiguration );
-
-            if ( monitor != null )
+            if ( monitor.isCanceled() )
             {
-                String taskName =
-                    NLS.bind( "Invoking {0} on {1}", getMojoExecution().getMojoDescriptor().getFullGoalName(),
-                              getMavenProjectFacade().getProject().getName() );
-                monitor.setTaskName( taskName );
+                throw new CoreException( Status.CANCEL_STATUS );
             }
+            monitor.worked( 1 );
 
             final String[] targets =
                 MavenPlugin.getMaven().getMojoParameterValue( getSession(), mojoExecution, "targetGroups", String.class ).split( "," );
 
+            monitor = SubMonitor.convert( monitor, targets.length );
+
             for ( String target : targets )
             {
-                target.trim();
-                createFile( new File( cssDestinationFolder, target + ".css" ), source, getCss( mojoExecution, target ), "\n" );
-                createFile( new File( jsDestinationFolder, target + ".js" ), source, getJs( mojoExecution, target ),";\n" );
+                if ( monitor.isCanceled() )
+                {
+                    throw new CoreException( Status.CANCEL_STATUS );
+                }
+                target = target.trim();
+                if ( isPomModified() || wroTargetChangeDetected( target, mojoExecution, buildContext ) )
+                {
+                    createFile( new File( cssDestinationFolder, target + ".css" ), source,
+                                getCss( mojoExecution, target ), "\n" );
+                    createFile( new File( jsDestinationFolder, target + ".js" ), source,
+                                getJs( mojoExecution, target ), ";\n" );
+                }
+                monitor.worked( 1 );
             }
-
         }
         finally
         {
@@ -135,51 +162,66 @@ public class Wro4jBuildParticipant
             return true;
         }
 
-        // check if any of the web resource files changed
-        File source = getFolder( mojoExecution, "contextFolder" );
-        // TODO also analyze output classes folders as wro4j can use classpath files
-        Scanner ds = buildContext.newScanner( source ); // delta or full scanner
-        ds.scan();
-        String[] includedFiles = ds.getIncludedFiles();
-        if ( includedFiles == null || includedFiles.length <= 0 )
-        {
-            return false;
-        }
+        return getChangedFiles( mojoExecution, buildContext ).length > 0;
 
-        final String[] targets =
-            MavenPlugin.getMaven().getMojoParameterValue( getSession(), mojoExecution, "targetGroups", String.class ).split( "," );
+    }
 
-        for ( String target : targets )
+    private boolean wroTargetChangeDetected( String target, MojoExecution mojoExecution, BuildContext buildContext )
+        throws CoreException
+    {
+        Collection<String> js = getJs( mojoExecution, target );
+        Collection<String> css = getCss( mojoExecution, target );
+        for ( String file : getChangedFiles( mojoExecution, buildContext ) )
         {
-            target = target.trim();
-            Collection<String> js = getJs( mojoExecution, target );
-            Collection<String> css = getCss( mojoExecution, target );
-            for ( String file : includedFiles )
+            file = '/' + file.replace( '\\', '/' );
+            if ( js.contains( file ) || css.contains( file ) )
             {
-                file = '/' + file.replace( '\\', '/' );
-                if ( js.contains( file ) || css.contains( file ) )
-                {
-                    return true;
-                }
+                return true;
             }
         }
         return false;
+
     }
 
     private boolean isPomModified()
     {
-        IMavenProjectFacade facade = getMavenProjectFacade();
-        IResourceDelta delta = getDelta( facade.getProject() );
-        if ( delta == null )
+        if ( pomModified == null )
         {
-            return false;
+            IMavenProjectFacade facade = getMavenProjectFacade();
+            IResourceDelta delta = getDelta( facade.getProject() );
+            if ( delta == null )
+            {
+                pomModified = Boolean.FALSE;
+            }
+            else if ( delta.findMember( facade.getPom().getProjectRelativePath() ) != null )
+            {
+                pomModified = Boolean.TRUE;
+            }
+            else
+            {
+                pomModified = Boolean.FALSE;
+            }
         }
+        return pomModified;
+    }
 
-        if ( delta.findMember( facade.getPom().getProjectRelativePath() ) != null )
+    private String[] getChangedFiles( MojoExecution mojoExecution, BuildContext buildContext )
+        throws CoreException
+    {
+        if ( changedFiles == null )
         {
-            return true;
+            // check if any of the web resource files changed
+            File source = getFolder( mojoExecution, "contextFolder" );
+            // TODO also analyze output classes folders as wro4j can use classpath files
+            Scanner ds = buildContext.newScanner( source ); // delta or full scanner
+            ds.scan();
+            changedFiles = ds.getIncludedFiles();
+            if ( changedFiles == null )
+            {
+                changedFiles = new String[0];
+            }
         }
-        return false;
+        return changedFiles;
     }
 
     private Xpp3Dom customize( Xpp3Dom originalConfiguration, File originalDestinationFolder,
@@ -319,7 +361,8 @@ public class Wro4jBuildParticipant
                 in = new FileInputStream( new File( contextFolder, file ) );
                 IOUtil.copy( in, out );
                 in.close();
-                if (separator != null)  {
+                if ( separator != null )
+                {
                     out.write( separator.getBytes() );
                 }
             }
