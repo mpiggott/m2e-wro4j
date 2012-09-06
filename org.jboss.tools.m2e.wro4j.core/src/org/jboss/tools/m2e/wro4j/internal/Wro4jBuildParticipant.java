@@ -103,8 +103,8 @@ public class Wro4jBuildParticipant
             for ( String target : targets )
             {
                 target.trim();
-                createFile( new File( jsDestinationFolder, target + ".css" ), source, getCss( mojoExecution, target ) );
-                createFile( new File( jsDestinationFolder, target + ".js" ), source, getJs( mojoExecution, target ) );
+                createFile( new File( cssDestinationFolder, target + ".css" ), source, getCss( mojoExecution, target ), "\n" );
+                createFile( new File( jsDestinationFolder, target + ".js" ), source, getJs( mojoExecution, target ),";\n" );
             }
 
         }
@@ -300,7 +300,7 @@ public class Wro4jBuildParticipant
         return model;
     }
 
-    private void createFile( File destination, File contextFolder, Collection<String> files )
+    private void createFile( File destination, File contextFolder, Collection<String> files, String separator )
         throws CoreException
     {
         File parent = destination.getParentFile();
@@ -319,6 +319,9 @@ public class Wro4jBuildParticipant
                 in = new FileInputStream( new File( contextFolder, file ) );
                 IOUtil.copy( in, out );
                 in.close();
+                if (separator != null)  {
+                    out.write( separator.getBytes() );
+                }
             }
         }
         catch ( Exception e )
