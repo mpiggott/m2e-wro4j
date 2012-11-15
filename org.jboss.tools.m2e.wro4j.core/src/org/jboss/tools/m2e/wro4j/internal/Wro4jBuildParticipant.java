@@ -55,6 +55,8 @@ public class Wro4jBuildParticipant
 
     private Boolean pomModified;
 
+    private Boolean modelModified;
+
     private String[] changedFiles;
 
     public Wro4jBuildParticipant( MojoExecution execution )
@@ -125,7 +127,7 @@ public class Wro4jBuildParticipant
                     throw new CoreException( Status.CANCEL_STATUS );
                 }
                 target = target.trim();
-                if ( isPomModified() || wroTargetChangeDetected( target, mojoExecution, buildContext ) )
+                if ( isPomModified() || isWroModelModified(mojoExecution) || wroTargetChangeDetected( target, mojoExecution, buildContext ) )
                 {
                     createFile( new File( cssDestinationFolder, target + ".css" ), source,
                                 getCss( mojoExecution, target ), "\n" );
@@ -157,7 +159,7 @@ public class Wro4jBuildParticipant
     {
 
         // If the pom file changed, we force wro4j's invocation
-        if ( isPomModified() )
+        if ( isPomModified() || isWroModelModified(mojoExecution) )
         {
             return true;
         }
@@ -180,7 +182,28 @@ public class Wro4jBuildParticipant
             }
         }
         return false;
+    }
 
+    private boolean isWroModelModified(MojoExecution mojoExecution) throws CoreException
+    {
+        if (modelModified) {
+            IMavenProjectFacade facade = getMavenProjectFacade();
+            IResourceDelta delta = getDelta( facade.getProject() );
+
+            if ( delta == null )
+            {
+                modelModified = Boolean.FALSE;
+            }
+            else if ( delta.findMember( MavenProjectUtils.getProjectRelativePath( getMavenProjectFacade().getProject(),
+                                                                                  MavenPlugin.getMaven().getMojoParameterValue( getSession(),
+                                                                                                                                mojoExecution,
+                                                                                                                                "wroFile",
+                                                                                                                                String.class ) ) ) != null )
+            {
+                modelModified = Boolean.TRUE;
+            }
+        }
+        return modelModified;
     }
 
     private boolean isPomModified()
