@@ -100,13 +100,11 @@ public class Wro4jBuildParticipant
         Set<IProject> result = null;
         try
         {
-            File destinationFolder = getFolder( mojoExecution, DESTINATION_FOLDER );
-            File jsDestinationFolder = getFolder( mojoExecution, JS_DESTINATION_FOLDER );
-            File cssDestinationFolder = getFolder( mojoExecution, CSS_DESTINATION_FOLDER );
             File source = getFolder( mojoExecution, "contextFolder" );
 
             Xpp3Dom customConfiguration =
-                customize( originalConfiguration, destinationFolder, jsDestinationFolder, cssDestinationFolder );
+                customize( originalConfiguration, getFolder( mojoExecution, DESTINATION_FOLDER ),
+                           getFolder( mojoExecution, JS_DESTINATION_FOLDER ), getFolder( mojoExecution, CSS_DESTINATION_FOLDER ) );
             // Add custom configuration
             mojoExecution.setConfiguration( customConfiguration );
             if ( monitor.isCanceled() )
@@ -129,9 +127,9 @@ public class Wro4jBuildParticipant
                 target = target.trim();
                 if ( isPomModified() || isWroModelModified(mojoExecution) || wroTargetChangeDetected( target, mojoExecution, buildContext ) )
                 {
-                    createFile( new File( cssDestinationFolder, target + ".css" ), source,
+                    createFile( new File( getFolder( mojoExecution, CSS_DESTINATION_FOLDER ), target + ".css" ), source,
                                 getCss( mojoExecution, target ), "\n" );
-                    createFile( new File( jsDestinationFolder, target + ".js" ), source,
+                    createFile( new File( getFolder( mojoExecution, JS_DESTINATION_FOLDER ), target + ".js" ), source,
                                 getJs( mojoExecution, target ), ";\n" );
                 }
                 monitor.worked( 1 );
@@ -269,24 +267,41 @@ public class Wro4jBuildParticipant
 
         IFolder webResourcesFolder =
             project.getFolder( relativeTargetPath.append( "m2e-wtp" ).append( "web-resources" ) );
-        if ( !webResourcesFolder.exists() )
+        if ( webResourcesFolder.exists() )
         {
-            // Not a m2e-wtp project, we don't know how to customize either
-            // TODO Try to support Sonatype's webby instead?
-            return originalConfiguration;
+            // WTP Project
+            return customizeConfiguration( facade, target, originalConfiguration, originalDestinationFolder,
+                                           originalJsDestinationFolder, originalCssDestinationFolder, webResourcesFolder );
         }
 
+        webResourcesFolder = project.getFolder(relativeTargetPath.append( "m2e-webby" ).append("war"));
+        if ( webResourcesFolder.exists() ) {
+            // Webby
+            return customizeConfiguration( facade, target, originalConfiguration, originalDestinationFolder,
+                                    originalJsDestinationFolder, originalCssDestinationFolder, webResourcesFolder );
+        }
+        // Not a m2e-wtp project, we don't know how to customize either
+        return originalConfiguration;
+    }
+
+    private Xpp3Dom customizeConfiguration(IMavenProjectFacade facade, String target, Xpp3Dom originalConfiguration,
+                                           File originalDestinationFolder, File originalJsDestinationFolder,
+                                           File originalCssDestinationFolder, IFolder webResourcesFolder) throws IOException {
+        // Webby
         IPath fullTargetPath = new Path( target );
         IPath defaultOutputPathPrefix = fullTargetPath.append( facade.getMavenProject().getBuild().getFinalName() );
 
         Xpp3Dom customConfiguration = new Xpp3Dom( "configuration" );
         Xpp3DomUtils.mergeXpp3Dom( customConfiguration, originalConfiguration );
 
-        customizeFolder( originalDestinationFolder, webResourcesFolder, defaultOutputPathPrefix, customConfiguration, DESTINATION_FOLDER );
+        customizeFolder( originalDestinationFolder, webResourcesFolder, defaultOutputPathPrefix, customConfiguration,
+                         DESTINATION_FOLDER );
 
-        customizeFolder( originalJsDestinationFolder, webResourcesFolder, defaultOutputPathPrefix, customConfiguration, JS_DESTINATION_FOLDER );
+        customizeFolder( originalJsDestinationFolder, webResourcesFolder, defaultOutputPathPrefix, customConfiguration,
+                         JS_DESTINATION_FOLDER );
 
-        customizeFolder( originalCssDestinationFolder, webResourcesFolder, defaultOutputPathPrefix, customConfiguration, CSS_DESTINATION_FOLDER );
+        customizeFolder( originalCssDestinationFolder, webResourcesFolder, defaultOutputPathPrefix, customConfiguration,
+                         CSS_DESTINATION_FOLDER );
 
         return customConfiguration;
     }
