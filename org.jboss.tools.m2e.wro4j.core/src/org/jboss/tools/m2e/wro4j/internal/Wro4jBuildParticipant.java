@@ -202,6 +202,10 @@ public class Wro4jBuildParticipant
             {
                 modelModified = Boolean.TRUE;
             }
+            else
+            {
+                modelModified = Boolean.FALSE;
+            }
         }
         return modelModified;
     }
