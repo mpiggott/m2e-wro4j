@@ -116,7 +116,7 @@ public class Wro4jBuildParticipant
             final String[] targets =
                 MavenPlugin.getMaven().getMojoParameterValue( getSession(), mojoExecution, "targetGroups", String.class ).split( "," );
 
-            monitor = SubMonitor.convert( monitor, targets.length );
+            IProgressMonitor submonitor = SubMonitor.convert( monitor, targets.length );
 
             for ( String target : targets )
             {
@@ -132,13 +132,14 @@ public class Wro4jBuildParticipant
                     createFile( new File( getFolder( mojoExecution, JS_DESTINATION_FOLDER ), target + ".js" ), source,
                                 getJs( mojoExecution, target ), ";\n" );
                 }
-                monitor.worked( 1 );
+                submonitor.worked( 1 );
             }
         }
         finally
         {
             // restore original configuration
             mojoExecution.setConfiguration( originalConfiguration );
+            monitor.done();
         }
 
         return result;
@@ -184,7 +185,8 @@ public class Wro4jBuildParticipant
 
     private boolean isWroModelModified(MojoExecution mojoExecution) throws CoreException
     {
-        if (modelModified) {
+        if ( modelModified == null )
+        {
             IMavenProjectFacade facade = getMavenProjectFacade();
             IResourceDelta delta = getDelta( facade.getProject() );
 
@@ -274,9 +276,10 @@ public class Wro4jBuildParticipant
                                            originalJsDestinationFolder, originalCssDestinationFolder, webResourcesFolder );
         }
 
-        webResourcesFolder = project.getFolder(relativeTargetPath.append( "m2e-webby" ).append("war"));
+        webResourcesFolder = project.getFolder( relativeTargetPath.append( "m2e-webby" ) );
         if ( webResourcesFolder.exists() ) {
             // Webby
+            webResourcesFolder = project.getFolder( webResourcesFolder.getProjectRelativePath().append( "war" ) );
             return customizeConfiguration( facade, target, originalConfiguration, originalDestinationFolder,
                                     originalJsDestinationFolder, originalCssDestinationFolder, webResourcesFolder );
         }
